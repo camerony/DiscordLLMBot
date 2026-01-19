@@ -10,7 +10,9 @@ A Discord bot that automatically translates messages between Chinese and English
 - **Language Mismatch Detection** - Bot adds 🔄 reaction when wrong language is used
 - **On-Demand Translation** - Click 🔄 to translate any message in-place
 - **Edit Tracking** - Updates translations when original messages are edited
-- **Direct Message Chat** - DM the bot to chat with the LLM directly (no translation)
+- **Direct Message Chat** - DM the bot or @mention it to chat with the LLM directly (no translation)
+- **RAG Knowledge Base** - Bot learns facts from conversations and provides contextual responses
+- **Designated RAG Channel** - Create #knowledge-base channel for explicit fact storage
 - **Rich Embeds** - Shows author, original message, and translation with clickable links
 - **Attachment Support** - Forwards images and files with translations
 - **Multi-Guild Support** - Works across multiple Discord servers
@@ -39,11 +41,28 @@ The bot monitors paired channels and translates messages bidirectionally:
 - Edited translations show a ✏️ indicator in the footer
 - Note: Edit tracking is stored in memory and resets when the bot restarts
 
-**Direct messages:**
-- DM the bot to chat with the LLM directly
+**Direct messages and @mentions:**
+- DM the bot or @mention it in any channel to chat with the LLM
 - No translation, just pure LLM conversation
 - Ask questions, get help, or chat about anything
-- Example: "What is the capital of France?"
+- Example: "@llmbot What is the capital of France?"
+
+**RAG Knowledge Base (Optional):**
+- Bot automatically learns facts from chat conversations
+- Provides contextual answers using stored knowledge
+- Per-server isolation - each Discord server has its own knowledge base
+- Example workflow:
+  1. User: "@llmbot Hey, John's birthday is May 15, 1990!"
+  2. Bot: [Responds and stores fact in background]
+  3. Later, user: "@llmbot When is John's birthday?"
+  4. Bot: "John's birthday is May 15, 1990" [using stored context]
+
+**Designated RAG Channel:**
+- Create a channel named #knowledge-base (or #facts, #rag, #info)
+- Post facts directly without @mentioning the bot
+- Bot reacts with ✅ to confirm fact was recorded
+- Facts from RAG channel are marked as "verified" and prioritized
+- Example: Post "Office address is 123 Main St, Seattle, WA" in #knowledge-base
 
 ### Channel Pairing Methods (in priority order)
 
@@ -140,6 +159,16 @@ Enable `DEBUG_MODE=true` to see detected channel pairs on startup.
 | `LLM_MODEL` | Model name | `mlx-community/Qwen3-30B-A3B-4bit` |
 | `CHANNEL_PAIRS` | Manual channel pairs (optional) | Empty (use auto-detection) |
 | `DEBUG_MODE` | Enable verbose logging | `false` |
+| **RAG Configuration** | | |
+| `RAG_ENABLED` | Enable RAG knowledge base | `false` |
+| `RAG_DATA_DIR` | Directory for guild JSON files | `/data` |
+| `RAG_EXTRACTION_ENABLED` | Auto-extract facts from messages | `true` |
+| `RAG_CONFIDENCE_THRESHOLD` | Minimum confidence to store facts (0-1) | `0.7` |
+| `RAG_MAX_CONTEXT_FACTS` | Max facts to inject into context | `5` |
+| `RAG_KEYWORD_MATCH_THRESHOLD` | Min keyword overlap for retrieval (0-1) | `0.3` |
+| `RAG_CHANNEL_ENABLED` | Enable designated RAG channel | `true` |
+| `RAG_CHANNEL_PATTERN` | Channel name pattern for RAG channels | `knowledge\|facts\|rag\|info` |
+| `RAG_VERIFIED_BOOST` | Score multiplier for verified facts | `1.5` |
 
 ## Examples
 

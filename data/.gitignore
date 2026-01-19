@@ -1,0 +1,5 @@
+# Ignore all guild data files
+*.json
+
+# Don't ignore this gitignore
+!.gitignore

@@ -2,6 +2,7 @@ import os
 import re
 import discord
 import aiohttp
+import asyncio
 from typing import Dict, Optional
 import time
 
@@ -9,6 +10,17 @@ DISCORD_TOKEN = os.environ["DISCORD_TOKEN"]
 LLM_URL = os.environ.get("LLM_URL", "http://localhost:8080/v1/chat/completions")
 LLM_MODEL = os.environ.get("LLM_MODEL", "qwen")
 DEBUG_MODE = os.environ.get("DEBUG_MODE", "false").lower() == "true"
+
+# RAG Configuration
+RAG_ENABLED = os.environ.get("RAG_ENABLED", "false").lower() == "true"
+RAG_DATA_DIR = os.environ.get("RAG_DATA_DIR", "/data")
+RAG_EXTRACTION_ENABLED = os.environ.get("RAG_EXTRACTION_ENABLED", "true").lower() == "true"
+RAG_CONFIDENCE_THRESHOLD = float(os.environ.get("RAG_CONFIDENCE_THRESHOLD", "0.7"))
+RAG_MAX_CONTEXT_FACTS = int(os.environ.get("RAG_MAX_CONTEXT_FACTS", "5"))
+RAG_KEYWORD_MATCH_THRESHOLD = float(os.environ.get("RAG_KEYWORD_MATCH_THRESHOLD", "0.3"))
+RAG_CHANNEL_ENABLED = os.environ.get("RAG_CHANNEL_ENABLED", "true").lower() == "true"
+RAG_CHANNEL_PATTERN = os.environ.get("RAG_CHANNEL_PATTERN", "knowledge|facts|rag|info")
+RAG_VERIFIED_BOOST = float(os.environ.get("RAG_VERIFIED_BOOST", "1.5"))
 
 # Parse manual channel pairs: "id1:id2,id3:id4,..."
 MANUAL_PAIRS = {}
@@ -31,6 +43,11 @@ translated_messages: set = set()
 # Track message ID mappings: original_message_id -> translation_message_id
 # Used for updating translations when original message is edited
 message_mappings: Dict[int, int] = {}
+
+# RAG Manager (initialized on bot ready if enabled)
+rag_manager = None
+if RAG_ENABLED:
+    from rag import RAGManager
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -220,9 +237,14 @@ async def translate(text: str) -> Optional[str]:
 
 @client.event
 async def on_ready():
-    global channel_pairs
+    global channel_pairs, rag_manager
 
     print(f"✓ Bot ready: {client.user}")
+
+    # Initialize RAG manager
+    if RAG_ENABLED:
+        rag_manager = RAGManager(data_dir=RAG_DATA_DIR)
+        print(f"✓ RAG enabled with data dir: {RAG_DATA_DIR}")
 
     # Build channel pairs for each guild
     for guild in client.guilds:
@@ -276,10 +298,24 @@ async def on_message(message):
 
         # Send typing indicator
         async with message.channel.typing():
+            # Retrieve context from RAG if enabled
+            context_str = None
+            if RAG_ENABLED and not is_dm and rag_manager:
+                guild_id = message.guild.id
+                context_str = await rag_manager.retrieve_context(guild_id, content)
+                if context_str:
+                    debug_log(f"Retrieved RAG context for query")
+
+            # Build messages array with context
+            messages = []
+            if context_str:
+                messages.append({"role": "system", "content": context_str})
+            messages.append({"role": "user", "content": content})
+
             # Make LLM request without translation prompt
             payload = {
                 "model": LLM_MODEL,
-                "messages": [{"role": "user", "content": content}],
+                "messages": messages,
                 "temperature": 0.7,
                 "max_tokens": 2000
             }
@@ -318,7 +354,33 @@ async def on_message(message):
             except Exception as e:
                 await message.reply("Sorry, I encountered an error processing your request.")
                 print(f"Chat error: {e}")
+
+        # Extract facts in background (non-blocking)
+        if RAG_ENABLED and not is_dm and RAG_EXTRACTION_ENABLED and rag_manager:
+            guild_id = message.guild.id
+            # Check if this is a designated RAG channel
+            is_rag = rag_manager.is_rag_channel(message.channel.name, message.channel.topic)
+            asyncio.create_task(
+                rag_manager.extract_facts_from_message(message, content, is_rag_channel=is_rag)
+            )
         return
+
+    # Handle RAG channel messages (extract facts even without @mention)
+    if RAG_ENABLED and RAG_CHANNEL_ENABLED and rag_manager:
+        if rag_manager.is_rag_channel(message.channel.name, message.channel.topic):
+            # Extract facts from RAG channel messages
+            content = message.content.strip()
+            if content and len(content) >= 2:
+                guild_id = message.guild.id
+                asyncio.create_task(
+                    rag_manager.extract_facts_from_message(message, content, is_rag_channel=True)
+                )
+                # React with ✅ to confirm fact was recorded
+                try:
+                    await message.add_reaction("✅")
+                except discord.errors.Forbidden:
+                    print("Warning: Bot lacks permission to add reactions")
+            return  # Don't process as translation
 
     # Check if this channel has a pair
     if message.channel.id not in channel_pairs:

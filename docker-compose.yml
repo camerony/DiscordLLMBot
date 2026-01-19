@@ -2,9 +2,21 @@ services:
   translator-bot:
     build: .
     restart: unless-stopped
+    volumes:
+      - ./data:/data
     environment:
       - DISCORD_TOKEN=${DISCORD_TOKEN}
       - LLM_URL=${LLM_URL:-http://llm.home.cameron.in:8080/v1/chat/completions}
       - LLM_MODEL=${LLM_MODEL:-mlx-community/Qwen3-30B-A3B-4bit}
       - CHANNEL_PAIRS=${CHANNEL_PAIRS:-}
       - DEBUG_MODE=${DEBUG_MODE:-false}
+      # RAG configuration
+      - RAG_ENABLED=${RAG_ENABLED:-false}
+      - RAG_DATA_DIR=${RAG_DATA_DIR:-/data}
+      - RAG_EXTRACTION_ENABLED=${RAG_EXTRACTION_ENABLED:-true}
+      - RAG_CONFIDENCE_THRESHOLD=${RAG_CONFIDENCE_THRESHOLD:-0.7}
+      - RAG_MAX_CONTEXT_FACTS=${RAG_MAX_CONTEXT_FACTS:-5}
+      - RAG_KEYWORD_MATCH_THRESHOLD=${RAG_KEYWORD_MATCH_THRESHOLD:-0.3}
+      - RAG_CHANNEL_ENABLED=${RAG_CHANNEL_ENABLED:-true}
+      - RAG_CHANNEL_PATTERN=${RAG_CHANNEL_PATTERN:-knowledge|facts|rag|info}
+      - RAG_VERIFIED_BOOST=${RAG_VERIFIED_BOOST:-1.5}
