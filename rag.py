@@ -18,6 +18,7 @@ RAG_KEYWORD_MATCH_THRESHOLD = float(os.environ.get("RAG_KEYWORD_MATCH_THRESHOLD"
 RAG_CHANNEL_ENABLED = os.environ.get("RAG_CHANNEL_ENABLED", "true").lower() == "true"
 RAG_CHANNEL_PATTERN = os.environ.get("RAG_CHANNEL_PATTERN", "knowledge|facts|rag|info")
 RAG_VERIFIED_BOOST = float(os.environ.get("RAG_VERIFIED_BOOST", "1.5"))
+RAG_EXTRACTION_MAX_TOKENS = int(os.environ.get("RAG_EXTRACTION_MAX_TOKENS", "1500"))
 
 # LLM Configuration (reuse from main bot)
 LLM_URL = os.environ.get("LLM_URL", "http://localhost:8080/v1/chat/completions")
@@ -286,7 +287,7 @@ Author: {message.author.display_name}"""
                     {"role": "user", "content": user_prompt}
                 ],
                 "temperature": 0.1,
-                "max_tokens": 1500
+                "max_tokens": RAG_EXTRACTION_MAX_TOKENS
             }
 
             # Make LLM request

@@ -177,6 +177,7 @@ Enable `DEBUG_MODE=true` to see detected channel pairs on startup.
 | `RAG_CONFIDENCE_THRESHOLD` | Minimum confidence to store facts (0-1) | `0.7` |
 | `RAG_MAX_CONTEXT_FACTS` | Max facts to inject into context | `5` |
 | `RAG_KEYWORD_MATCH_THRESHOLD` | Min keyword overlap for retrieval (0-1) | `0.3` |
+| `RAG_EXTRACTION_MAX_TOKENS` | Max tokens for LLM fact extraction | `1500` |
 | `RAG_CHANNEL_ENABLED` | Enable designated RAG channel | `true` |
 | `RAG_CHANNEL_PATTERN` | Channel name pattern for RAG channels | `knowledge\|facts\|rag\|info` |
 | `RAG_VERIFIED_BOOST` | Score multiplier for verified facts | `1.5` |
