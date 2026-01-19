@@ -2,23 +2,152 @@ import os
 import re
 import discord
 import aiohttp
+from typing import Dict, Optional
+import time
 
 DISCORD_TOKEN = os.environ["DISCORD_TOKEN"]
 LLM_URL = os.environ.get("LLM_URL", "http://localhost:8080/v1/chat/completions")
 LLM_MODEL = os.environ.get("LLM_MODEL", "qwen")
-MONITORED_CHANNELS = [int(c) for c in os.environ.get("MONITORED_CHANNELS", "").split(",") if c.strip()]
+DEBUG_MODE = os.environ.get("DEBUG_MODE", "false").lower() == "true"
+
+# Parse manual channel pairs: "id1:id2,id3:id4,..."
+MANUAL_PAIRS = {}
+pairs_str = os.environ.get("CHANNEL_PAIRS", "")
+if pairs_str:
+    for pair in pairs_str.split(","):
+        if ":" in pair:
+            ch1, ch2 = pair.strip().split(":")
+            ch1_id, ch2_id = int(ch1), int(ch2)
+            # Bidirectional mapping
+            MANUAL_PAIRS[ch1_id] = ch2_id
+            MANUAL_PAIRS[ch2_id] = ch1_id
+
+# Will be populated on bot ready
+channel_pairs: Dict[int, int] = {}
 
 intents = discord.Intents.default()
 intents.message_content = True
+intents.guilds = True
 client = discord.Client(intents=intents)
 
 
-def has_chinese(text):
+def debug_log(message: str):
+    """Log message if debug mode is enabled."""
+    if DEBUG_MODE:
+        print(f"[DEBUG] {message}")
+
+
+def has_chinese(text: str) -> bool:
     """Check if text contains Chinese characters."""
     return bool(re.search(r'[\u4e00-\u9fff]', text))
 
 
-async def translate(text):
+def strip_emoji(channel_name: str) -> str:
+    """Remove emoji from start of channel name."""
+    # Remove emoji and common separators from start
+    return re.sub(r'^[\U0001F000-\U0001F9FF\s\-_]+', '', channel_name).strip()
+
+
+def find_channel_by_name(guild: discord.Guild, name: str) -> Optional[discord.TextChannel]:
+    """Find channel by name, trying exact match first, then without emoji."""
+    # Remove # prefix if present
+    name = name.lstrip('#').strip()
+
+    # Try exact match first
+    for channel in guild.text_channels:
+        if channel.name == name:
+            return channel
+
+    # Try without emoji
+    name_stripped = strip_emoji(name)
+    for channel in guild.text_channels:
+        if strip_emoji(channel.name) == name_stripped:
+            return channel
+
+    return None
+
+
+def parse_pair_from_topic(topic: str) -> Optional[str]:
+    """Extract pair declaration from channel topic."""
+    if not topic:
+        return None
+
+    # Match "pair: channel" or "translate: channel"
+    # Supports: pair:channel, pair: channel, pair:#channel, pair:<#123>
+    match = re.search(r'(?:pair|translate):\s*<?#?(\S+?)>?(?:\s|$|,|\|)', topic, re.IGNORECASE)
+    if match:
+        return match.group(1)
+    return None
+
+
+def auto_detect_pairs(guild: discord.Guild) -> Dict[int, int]:
+    """Auto-detect channel pairs by emoji prefix and language."""
+    pairs = {}
+    channels = list(guild.text_channels)
+
+    # Group channels by emoji prefix
+    emoji_groups: Dict[str, list] = {}
+    for channel in channels:
+        # Extract emoji from channel name
+        emoji_match = re.match(r'^([\U0001F000-\U0001F9FF]+)', channel.name)
+        if emoji_match:
+            emoji = emoji_match.group(1)
+            if emoji not in emoji_groups:
+                emoji_groups[emoji] = []
+            emoji_groups[emoji].append(channel)
+
+    # Within each emoji group, pair Chinese and non-Chinese channels
+    for emoji, group in emoji_groups.items():
+        chinese_channels = [ch for ch in group if has_chinese(ch.name)]
+        english_channels = [ch for ch in group if not has_chinese(ch.name)]
+
+        # Simple pairing: first Chinese with first English
+        if chinese_channels and english_channels:
+            for cn_ch, en_ch in zip(chinese_channels, english_channels):
+                pairs[cn_ch.id] = en_ch.id
+                pairs[en_ch.id] = cn_ch.id
+                debug_log(f"Auto-paired: {en_ch.name} ({en_ch.id}) ↔ {cn_ch.name} ({cn_ch.id})")
+
+    return pairs
+
+
+def build_channel_pairs(guild: discord.Guild) -> Dict[int, int]:
+    """Build complete channel pair mapping with priority: topic > manual > auto."""
+    pairs = {}
+
+    # Step 1: Auto-detect as base layer
+    pairs.update(auto_detect_pairs(guild))
+
+    # Step 2: Apply manual pairs (override auto-detect)
+    pairs.update(MANUAL_PAIRS)
+    if MANUAL_PAIRS:
+        debug_log(f"Applied {len(MANUAL_PAIRS) // 2} manual pair overrides")
+
+    # Step 3: Parse channel topics (highest priority)
+    for channel in guild.text_channels:
+        if channel.topic:
+            pair_ref = parse_pair_from_topic(channel.topic)
+            if pair_ref:
+                # Try to parse as channel ID
+                try:
+                    pair_id = int(pair_ref)
+                    pair_channel = guild.get_channel(pair_id)
+                except ValueError:
+                    # Not an ID, search by name
+                    pair_channel = find_channel_by_name(guild, pair_ref)
+
+                if pair_channel:
+                    # Bidirectional mapping
+                    pairs[channel.id] = pair_channel.id
+                    pairs[pair_channel.id] = channel.id
+                    debug_log(f"Topic-paired: {channel.name} ({channel.id}) ↔ {pair_channel.name} ({pair_channel.id})")
+                else:
+                    debug_log(f"Warning: Channel '{channel.name}' references pair '{pair_ref}' but not found")
+
+    return pairs
+
+
+async def translate(text: str) -> Optional[str]:
     """Translate text using the LLM API."""
     # Detect direction based on Chinese character presence
     if has_chinese(text):
@@ -48,11 +177,34 @@ async def translate(text):
 
 @client.event
 async def on_ready():
-    print(f"Bot ready: {client.user}")
-    if MONITORED_CHANNELS:
-        print(f"Monitoring channels: {MONITORED_CHANNELS}")
+    global channel_pairs
+
+    print(f"✓ Bot ready: {client.user}")
+
+    # Build channel pairs for each guild
+    for guild in client.guilds:
+        print(f"✓ Connected to server: {guild.name}")
+        guild_pairs = build_channel_pairs(guild)
+        channel_pairs.update(guild_pairs)
+
+    if DEBUG_MODE:
+        print(f"\n{'='*50}")
+        print(f"Channel Pairs Summary:")
+        print(f"{'='*50}")
+        # Show unique pairs (avoid showing A↔B and B↔A)
+        shown = set()
+        for ch1_id, ch2_id in channel_pairs.items():
+            if ch1_id not in shown:
+                ch1 = client.get_channel(ch1_id)
+                ch2 = client.get_channel(ch2_id)
+                if ch1 and ch2:
+                    print(f"  • {ch1.name} ({ch1_id}) ↔ {ch2.name} ({ch2_id})")
+                    shown.add(ch1_id)
+                    shown.add(ch2_id)
+        print(f"{'='*50}")
+        print(f"Total active pairs: {len(shown) // 2}\n")
     else:
-        print("Monitoring ALL channels (no filter set)")
+        print(f"✓ Monitoring {len(channel_pairs) // 2} channel pairs")
 
 
 @client.event
@@ -61,17 +213,84 @@ async def on_message(message):
     if message.author.bot:
         return
 
-    # Check if channel is monitored (empty list = monitor all)
-    if MONITORED_CHANNELS and message.channel.id not in MONITORED_CHANNELS:
+    # Check if this channel has a pair
+    if message.channel.id not in channel_pairs:
+        debug_log(f"Skipping message in unpaired channel: {message.channel.name}")
         return
 
-    # Skip very short messages
-    if len(message.content.strip()) < 2:
+    # Get paired channel
+    target_channel_id = channel_pairs[message.channel.id]
+    target_channel = client.get_channel(target_channel_id)
+
+    if not target_channel:
+        debug_log(f"Error: Paired channel {target_channel_id} not found")
         return
 
-    translation = await translate(message.content)
-    if translation:
-        await message.reply(f"**Translation:**\n{translation}", mention_author=False)
+    # Handle media-only messages
+    content = message.content.strip()
+    if not content and (message.attachments or message.embeds):
+        content = "[Media attachment]"
+
+    # Skip if no content at all
+    if not content or len(content) < 2:
+        debug_log(f"Skipping short/empty message")
+        return
+
+    # Translate the content
+    start_time = time.time()
+    translation = await translate(content)
+    elapsed = time.time() - start_time
+
+    if not translation:
+        debug_log(f"Translation failed for message in {message.channel.name}")
+        return
+
+    debug_log(f"Translated message from {message.channel.name} → {target_channel.name} ({elapsed:.2f}s)")
+
+    # Create embed with author info
+    embed = discord.Embed(
+        description=translation,
+        color=0x5865F2 if not has_chinese(content) else 0xED4245  # Blue for EN→CN, Red for CN→EN
+    )
+
+    # Add author info
+    embed.set_author(
+        name=f"{message.author.display_name} • #{message.channel.name}",
+        icon_url=message.author.display_avatar.url
+    )
+
+    # Add original message preview if not too long
+    if len(content) <= 100:
+        embed.add_field(name="Original", value=content, inline=False)
+    else:
+        embed.add_field(name="Original", value=content[:100] + "...", inline=False)
+
+    # Add link to original message
+    embed.set_footer(text="🔗 Jump to original")
+    embed.url = message.jump_url
+
+    # Prepare attachment info
+    files_to_send = []
+    attachment_info = []
+
+    if message.attachments:
+        for att in message.attachments:
+            # Add attachment URLs to embed
+            if att.content_type and att.content_type.startswith('image/'):
+                attachment_info.append(f"📷 [{att.filename}]({att.url})")
+                # Set first image as embed image
+                if not embed.image:
+                    embed.set_image(url=att.url)
+            elif att.content_type and att.content_type.startswith('video/'):
+                attachment_info.append(f"📹 [{att.filename}]({att.url})")
+            else:
+                attachment_info.append(f"📎 [{att.filename}]({att.url})")
+
+    if attachment_info:
+        embed.add_field(name="Attachments", value="\n".join(attachment_info), inline=False)
+
+    # Send translation to paired channel
+    await target_channel.send(embed=embed)
 
 
 if __name__ == "__main__":

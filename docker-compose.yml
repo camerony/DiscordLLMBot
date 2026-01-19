@@ -6,4 +6,5 @@ services:
       - DISCORD_TOKEN=${DISCORD_TOKEN}
       - LLM_URL=${LLM_URL:-http://llm.home.cameron.in:8080/v1/chat/completions}
       - LLM_MODEL=${LLM_MODEL:-mlx-community/Qwen3-30B-A3B-4bit}
-      - MONITORED_CHANNELS=${MONITORED_CHANNELS:-}
+      - CHANNEL_PAIRS=${CHANNEL_PAIRS:-}
+      - DEBUG_MODE=${DEBUG_MODE:-false}
