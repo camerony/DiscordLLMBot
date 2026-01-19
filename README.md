@@ -223,6 +223,63 @@ translate-pair:
 CHANNEL_PAIRS=1462598082326827114:1462598082326827118,1462598082326827115:1462598082326827119
 ```
 
+## Troubleshooting
+
+### Checking RAG Database
+
+To inspect what facts are stored in the RAG database:
+
+```bash
+# Via SSH (deployed on remote server)
+ssh root@canada.nb.wan 'docker exec tools-discordllmbot-7kixv4-translator-bot-1 python check_rag.py'
+
+# Local deployment
+docker-compose exec translator-bot python check_rag.py
+```
+
+### Viewing Bot Logs
+
+```bash
+# Via SSH (deployed on remote server)
+ssh root@canada.nb.wan 'docker logs tools-discordllmbot-7kixv4-translator-bot-1 --tail 100'
+
+# Follow logs in real-time
+ssh root@canada.nb.wan 'docker logs tools-discordllmbot-7kixv4-translator-bot-1 --tail 100 -f'
+
+# Local deployment
+docker-compose logs -f
+```
+
+### Finding the Container Name
+
+If the container name changes (e.g., after redeployment):
+
+```bash
+# Via SSH
+ssh root@canada.nb.wan 'docker ps | grep discord'
+
+# Local
+docker ps | grep discord
+```
+
+### Common Issues
+
+**RAG not extracting facts:**
+- Check if RAG is enabled: `RAG_ENABLED=true` in environment
+- Verify the channel name matches the pattern (knowledge, facts, rag, or info)
+- Check logs for extraction errors: look for "Error extracting facts"
+- Ensure LLM server is accessible
+
+**LLM server connection errors:**
+- Verify `LLM_URL` is correct in environment variables
+- Check if LLM server is running: `curl http://llm.home.cameron.in:8080/v1/models`
+- For "Server disconnected" errors: bot is overwhelming the server (already fixed with sequential processing)
+
+**Bot not responding to questions:**
+- Ensure facts exist in database using `check_rag.py`
+- Keywords must overlap between query and stored facts
+- Check `RAG_KEYWORD_MATCH_THRESHOLD` (default: 0.3)
+
 ## License
 
 MIT
