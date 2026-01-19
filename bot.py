@@ -376,11 +376,15 @@ async def on_message(message):
                 # Chunk large messages with context preservation
                 chunks = await rag_manager.chunk_message_with_context(content)
 
-                # Process each chunk separately
-                for chunk in chunks:
-                    asyncio.create_task(
-                        rag_manager.extract_facts_from_message(message, chunk, is_rag_channel=True)
-                    )
+                print(f"[RAG] Processing {len(chunks)} chunk(s) sequentially to avoid server overload...")
+
+                # Process chunks sequentially to avoid overwhelming LLM server
+                for i, chunk in enumerate(chunks, 1):
+                    try:
+                        print(f"[RAG] Processing chunk {i}/{len(chunks)}...")
+                        await rag_manager.extract_facts_from_message(message, chunk, is_rag_channel=True)
+                    except Exception as e:
+                        print(f"[RAG] Error processing chunk {i}/{len(chunks)}: {e}")
 
                 # React with ✅ to confirm fact was recorded
                 try:
