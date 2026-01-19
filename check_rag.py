@@ -1,12 +1,21 @@
 #!/usr/bin/env python3
-"""Check RAG database contents."""
+"""Check RAG database contents including vector database."""
 
 import json
 import os
 import glob
 
+# Vector database support
+try:
+    import chromadb
+    from chromadb.config import Settings
+    CHROMA_AVAILABLE = True
+except ImportError:
+    CHROMA_AVAILABLE = False
+
 # Use environment variable or default to /data
 data_dir = os.environ.get("RAG_DATA_DIR", "/data")
+RAG_VECTOR_ENABLED = os.environ.get("RAG_VECTOR_ENABLED", "true").lower() == "true"
 
 print("=" * 60)
 print("RAG Database Contents")
@@ -57,4 +66,46 @@ for file_path in guild_files:
     except Exception as e:
         print(f"Error reading {file_path}: {e}")
 
+# Vector Database Stats
+print()
+print("=" * 60)
+print("Vector Database Stats")
+print("=" * 60)
+
+if not CHROMA_AVAILABLE:
+    print("\nChromaDB not installed - vector search unavailable")
+elif not RAG_VECTOR_ENABLED:
+    print("\nVector search disabled (RAG_VECTOR_ENABLED=false)")
+else:
+    try:
+        chroma_path = os.path.join(data_dir, "chroma")
+        if os.path.exists(chroma_path):
+            chroma_client = chromadb.PersistentClient(
+                path=chroma_path,
+                settings=Settings(anonymized_telemetry=False)
+            )
+
+            collections = chroma_client.list_collections()
+            print(f"\nChroma DB path: {chroma_path}")
+            print(f"Total collections: {len(collections)}")
+
+            for collection in collections:
+                count = collection.count()
+                print(f"\n  Collection: {collection.name}")
+                print(f"    Vector count: {count}")
+
+                # Show sample if not empty
+                if count > 0:
+                    sample = collection.peek(limit=3)
+                    if sample["documents"]:
+                        print(f"    Sample documents:")
+                        for doc in sample["documents"][:3]:
+                            preview = doc[:60] + "..." if len(doc) > 60 else doc
+                            print(f"      - {preview}")
+        else:
+            print(f"\nNo ChromaDB data found at {chroma_path}")
+    except Exception as e:
+        print(f"\nError accessing ChromaDB: {e}")
+
+print()
 print("=" * 60)

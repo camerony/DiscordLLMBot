@@ -82,6 +82,15 @@ You can designate a RAG channel in two ways:
 - Implicit context is made explicit: "Email: bella@gmail.com" becomes "Bella Liu's email is bella@gmail.com"
 - You can paste multiple contacts at once - the bot handles splitting and context preservation
 
+**Vector Search (Semantic Retrieval):**
+- Uses ChromaDB with sentence-transformers for semantic search
+- Finds facts by meaning, not just keyword matching
+- "When was John born?" matches "John's birthday is May 15" (semantic similarity)
+- Synonyms work: "spouse" finds facts about "wife" or "husband"
+- First query triggers lazy migration of existing JSON facts to vector DB
+- Embedding model runs locally (no external API calls)
+- Can be disabled with `RAG_VECTOR_ENABLED=false` to fall back to keyword search
+
 ### Channel Pairing Methods (in priority order)
 
 1. **Channel Topic - Explicit Pairing** (highest priority) - Add to channel description:
@@ -184,13 +193,17 @@ Enable `DEBUG_MODE=true` to see detected channel pairs on startup.
 | `RAG_CONFIDENCE_THRESHOLD` | Minimum confidence to store facts (0-1) | `0.7` |
 | `RAG_MAX_CONTEXT_FACTS` | Max facts to inject into context | `5` |
 | `RAG_KEYWORD_MATCH_THRESHOLD` | Min keyword overlap for retrieval (0-1) | `0.3` |
-| `RAG_EXTRACTION_MAX_TOKENS` | Max tokens for LLM fact extraction | `1500` |
+| `RAG_EXTRACTION_MAX_TOKENS` | Max tokens for LLM fact extraction | `10000` |
 | `RAG_CHANNEL_ENABLED` | Enable designated RAG channel | `true` |
 | `RAG_CHANNEL_PATTERN` | Channel name pattern for RAG channels | `knowledge\|facts\|rag\|info` |
 | `RAG_VERIFIED_BOOST` | Score multiplier for verified facts | `1.5` |
 | `RAG_CHUNKING_ENABLED` | Enable LLM-based message chunking | `true` |
+| `RAG_CHUNKING_MAX_TOKENS` | Max tokens for chunking LLM call | `10000` |
 | `RAG_CHUNK_THRESHOLD` | Min characters before chunking | `2000` |
 | `RAG_CHUNK_MAX_SIZE` | Target size per chunk | `500` |
+| **Vector Search** | | |
+| `RAG_VECTOR_ENABLED` | Enable semantic vector search | `true` |
+| `RAG_EMBEDDING_MODEL` | Sentence-transformers model | `all-MiniLM-L6-v2` |
 
 ## Examples
 

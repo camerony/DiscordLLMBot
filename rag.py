@@ -8,6 +8,11 @@ from datetime import datetime
 from collections import OrderedDict
 import uuid
 
+# Vector database imports
+import chromadb
+from chromadb.config import Settings
+from sentence_transformers import SentenceTransformer
+
 # RAG Configuration
 RAG_ENABLED = os.environ.get("RAG_ENABLED", "false").lower() == "true"
 RAG_DATA_DIR = os.environ.get("RAG_DATA_DIR", "/data")
@@ -23,6 +28,8 @@ RAG_CHUNKING_ENABLED = os.environ.get("RAG_CHUNKING_ENABLED", "true").lower() ==
 RAG_CHUNKING_MAX_TOKENS = int(os.environ.get("RAG_CHUNKING_MAX_TOKENS", "10000"))
 RAG_CHUNK_THRESHOLD = int(os.environ.get("RAG_CHUNK_THRESHOLD", "2000"))
 RAG_CHUNK_MAX_SIZE = int(os.environ.get("RAG_CHUNK_MAX_SIZE", "500"))
+RAG_VECTOR_ENABLED = os.environ.get("RAG_VECTOR_ENABLED", "true").lower() == "true"
+RAG_EMBEDDING_MODEL = os.environ.get("RAG_EMBEDDING_MODEL", "all-MiniLM-L6-v2")
 
 # LLM Configuration (reuse from main bot)
 LLM_URL = os.environ.get("LLM_URL", "http://localhost:8080/v1/chat/completions")
@@ -41,7 +48,7 @@ STOPWORDS = {
 
 
 class RAGManager:
-    """Manages RAG knowledge base with per-guild JSON storage."""
+    """Manages RAG knowledge base with per-guild JSON storage and vector search."""
 
     def __init__(self, data_dir: str = RAG_DATA_DIR):
         self.data_dir = data_dir
@@ -50,6 +57,23 @@ class RAGManager:
 
         # Ensure data directory exists
         os.makedirs(data_dir, exist_ok=True)
+
+        # Initialize vector database components
+        if RAG_VECTOR_ENABLED:
+            print(f"[RAG] Loading embedding model: {RAG_EMBEDDING_MODEL}")
+            self.embedding_model = SentenceTransformer(RAG_EMBEDDING_MODEL)
+            print(f"[RAG] Embedding model loaded")
+
+            # Initialize ChromaDB with persistent storage
+            chroma_path = os.path.join(data_dir, "chroma")
+            self.chroma_client = chromadb.PersistentClient(
+                path=chroma_path,
+                settings=Settings(anonymized_telemetry=False)
+            )
+            print(f"[RAG] ChromaDB initialized at {chroma_path}")
+        else:
+            self.embedding_model = None
+            self.chroma_client = None
 
     def _get_guild_file(self, guild_id: int) -> str:
         """Get the file path for a guild's data."""
@@ -155,6 +179,155 @@ class RAGManager:
 
         return False
 
+    # ==================== Vector Database Methods ====================
+
+    def _get_collection(self, guild_id: int):
+        """Get or create ChromaDB collection for a guild."""
+        if not self.chroma_client:
+            return None
+        collection_name = f"guild_{guild_id}"
+        return self.chroma_client.get_or_create_collection(
+            name=collection_name,
+            metadata={"hnsw:space": "cosine"}
+        )
+
+    def _embed_text(self, text: str) -> List[float]:
+        """Generate embedding for text."""
+        if not self.embedding_model:
+            return []
+        return self.embedding_model.encode(text).tolist()
+
+    def add_fact_to_vector_db(self, guild_id: int, fact: Dict):
+        """Add a fact to the vector database."""
+        if not RAG_VECTOR_ENABLED or not self.chroma_client:
+            return
+
+        collection = self._get_collection(guild_id)
+        if not collection:
+            return
+
+        # Generate embedding from fact content
+        embedding = self._embed_text(fact["content"])
+        if not embedding:
+            return
+
+        # Store with metadata
+        try:
+            collection.add(
+                ids=[fact["id"]],
+                embeddings=[embedding],
+                metadatas=[{
+                    "content": fact["content"],
+                    "category": fact.get("category", "general"),
+                    "verified": fact.get("verified", False),
+                    "confidence": fact.get("confidence", 0.0)
+                }],
+                documents=[fact["content"]]
+            )
+        except Exception as e:
+            # Might fail if ID already exists
+            print(f"[RAG] Error adding fact to vector DB: {e}")
+
+    def search_facts_vector(self, guild_id: int, query: str, n_results: int = None) -> List[Dict]:
+        """Search facts using vector similarity."""
+        if not RAG_VECTOR_ENABLED or not self.chroma_client:
+            return []
+
+        if n_results is None:
+            n_results = RAG_MAX_CONTEXT_FACTS
+
+        collection = self._get_collection(guild_id)
+        if not collection:
+            return []
+
+        # Check if collection is empty
+        if collection.count() == 0:
+            return []
+
+        # Generate query embedding
+        query_embedding = self._embed_text(query)
+        if not query_embedding:
+            return []
+
+        # Search with cosine similarity
+        results = collection.query(
+            query_embeddings=[query_embedding],
+            n_results=min(n_results * 2, collection.count())  # Get extra to filter after boost
+        )
+
+        # Format results
+        facts = []
+        if results["metadatas"] and results["metadatas"][0]:
+            for i, metadata in enumerate(results["metadatas"][0]):
+                # ChromaDB returns L2 distance by default for cosine space
+                # Lower distance = more similar
+                distance = results["distances"][0][i] if results["distances"] else 0
+                score = 1 - (distance / 2)  # Normalize to 0-1 range for cosine
+
+                # Apply verified boost
+                if metadata.get("verified", False):
+                    score *= RAG_VERIFIED_BOOST
+
+                facts.append({
+                    "content": metadata["content"],
+                    "category": metadata.get("category", "general"),
+                    "verified": metadata.get("verified", False),
+                    "confidence": metadata.get("confidence", 0.0),
+                    "score": score
+                })
+
+        # Sort by boosted score
+        facts.sort(key=lambda x: x["score"], reverse=True)
+        return facts[:RAG_MAX_CONTEXT_FACTS]
+
+    def migrate_to_vector_db(self, guild_id: int):
+        """Migrate existing JSON facts to vector database."""
+        if not RAG_VECTOR_ENABLED or not self.chroma_client:
+            return
+
+        data = self.load_guild_data(guild_id)
+        facts = data.get("facts", [])
+
+        if not facts:
+            return
+
+        collection = self._get_collection(guild_id)
+        if not collection:
+            return
+
+        # Check what's already in vector DB
+        existing_ids = set()
+        if collection.count() > 0:
+            try:
+                existing_ids = set(collection.get()["ids"])
+            except Exception:
+                pass
+
+        migrated = 0
+        for fact in facts:
+            if fact["id"] not in existing_ids:
+                try:
+                    self.add_fact_to_vector_db(guild_id, fact)
+                    migrated += 1
+                except Exception as e:
+                    print(f"[RAG] Migration error for fact {fact['id']}: {e}")
+
+        if migrated > 0:
+            print(f"[RAG] Migrated {migrated} facts to vector DB for guild {guild_id}")
+
+    def get_vector_count(self, guild_id: int) -> int:
+        """Get the number of facts in the vector database for a guild."""
+        if not RAG_VECTOR_ENABLED or not self.chroma_client:
+            return 0
+
+        collection = self._get_collection(guild_id)
+        if not collection:
+            return 0
+
+        return collection.count()
+
+    # ==================== End Vector Database Methods ====================
+
     def extract_keywords(self, text: str) -> List[str]:
         """Extract keywords from text (lowercase, no stopwords)."""
         # Tokenize: split on non-alphanumeric
@@ -217,22 +390,45 @@ class RAGManager:
         return [fact for score, fact in scored_facts[:RAG_MAX_CONTEXT_FACTS]]
 
     async def retrieve_context(self, guild_id: int, query: str) -> Optional[str]:
-        """Retrieve relevant context for a query."""
+        """Retrieve relevant context for a query using vector search (with fallback to keyword)."""
         try:
-            # Load guild data
+            # Load guild data for migration check and fallback
             data = self.load_guild_data(guild_id)
             facts = data.get("facts", [])
 
             if not facts:
                 return None
 
-            # Extract query keywords
+            # Use vector search if enabled
+            if RAG_VECTOR_ENABLED and self.chroma_client:
+                # Lazy migration: check if vector DB needs population
+                json_count = len(facts)
+                vector_count = self.get_vector_count(guild_id)
+
+                if json_count > vector_count:
+                    print(f"[RAG] Lazy migration: {json_count} JSON facts, {vector_count} vector facts")
+                    self.migrate_to_vector_db(guild_id)
+
+                # Search using vector similarity
+                relevant_facts = self.search_facts_vector(guild_id, query)
+
+                if relevant_facts:
+                    # Format context string
+                    context_lines = ["Relevant context from this server:"]
+                    for fact in relevant_facts:
+                        content = fact["content"]
+                        verified = fact.get("verified", False)
+                        source = "(verified)" if verified else "(from chat)"
+                        context_lines.append(f"- {content} {source}")
+                    return "\n".join(context_lines)
+
+            # Fallback to keyword search
             query_keywords = self.extract_keywords(query)
 
             if not query_keywords:
                 return None
 
-            # Search for relevant facts
+            # Search for relevant facts using keywords
             relevant_facts = self.search_facts(facts, query_keywords)
 
             if not relevant_facts:
@@ -354,6 +550,11 @@ Each fact should have:
 - keywords: Array of searchable keywords (lowercase, no stopwords). IMPORTANT: Always include person names, places, and other entity names as keywords!
 - entities: Object with extracted entities (e.g., {"person": "John", "date": "May 15, 1990"})
 
+IMPORTANT: Replace first-person pronouns (I, me, my, mine) with the author's name.
+Example: If author is "Cameron" and message is "I live in Seattle":
+- content should be: "Cameron lives in Seattle"
+- NOT: "I live in Seattle"
+
 Example: For "Cameron River's birthday is June 6, 1976"
 - keywords should be: ["cameron", "river", "birthday", "june", "1976"]
 - NOT just: ["birthday", "june", "1976"]
@@ -456,6 +657,12 @@ Author: {message.author.display_name}"""
                 # Add to facts
                 existing_facts.append(fact_entry)
                 new_facts_added += 1
+
+                # Add to vector database
+                try:
+                    self.add_fact_to_vector_db(guild_id, fact_entry)
+                except Exception as e:
+                    print(f"[RAG] Error adding fact to vector DB: {e}")
 
                 # Update category count
                 category = fact_entry["category"]

@@ -1,7 +1,7 @@
 FROM python:3.12-slim
 WORKDIR /app
 RUN mkdir -p /data && chmod 777 /data
-RUN pip install --no-cache-dir discord.py aiohttp
+RUN pip install --no-cache-dir discord.py aiohttp chromadb sentence-transformers
 COPY bot.py .
 COPY rag.py .
 COPY check_rag.py .
