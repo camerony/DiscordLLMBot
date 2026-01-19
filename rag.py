@@ -351,8 +351,12 @@ Each fact should have:
 - content: The fact as a complete sentence
 - category: One of [birthday, location, contact, preference, general]
 - confidence: A score from 0 to 1 indicating your confidence in the fact
-- keywords: Array of searchable keywords (lowercase, no stopwords)
+- keywords: Array of searchable keywords (lowercase, no stopwords). IMPORTANT: Always include person names, places, and other entity names as keywords!
 - entities: Object with extracted entities (e.g., {"person": "John", "date": "May 15, 1990"})
+
+Example: For "Cameron River's birthday is June 6, 1976"
+- keywords should be: ["cameron", "river", "birthday", "june", "1976"]
+- NOT just: ["birthday", "june", "1976"]
 
 Return [] if no facts are found. Do not include conversational or hypothetical statements."""
 
