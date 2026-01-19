@@ -58,10 +58,21 @@ The bot monitors paired channels and translates messages bidirectionally:
   4. Bot: "John's birthday is May 15, 1990" [using stored context]
 
 **Designated RAG Channel:**
-- Create a channel named #knowledge-base (or #facts, #rag, #info)
+
+You can designate a RAG channel in two ways:
+
+1. **Channel Name Pattern** (automatic detection):
+   - Create a channel named #knowledge-base, #facts, #rag, or #info
+   - Bot automatically detects these channels
+
+2. **Channel Topic Tag** (explicit designation):
+   - Add `rag: true` to any channel's topic/description
+   - Example: "Team information | rag: true"
+
+**How it works:**
 - Post facts directly without @mentioning the bot
 - Bot reacts with ✅ to confirm fact was recorded
-- Facts from RAG channel are marked as "verified" and prioritized
+- Facts from RAG channel are marked as "verified" and prioritized 1.5x
 - Example: Post "Office address is 123 Main St, Seattle, WA" in #knowledge-base
 
 ### Channel Pairing Methods (in priority order)
