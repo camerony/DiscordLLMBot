@@ -306,13 +306,21 @@ Example output:
                     data = await resp.json()
                     response_text = data["choices"][0]["message"]["content"].strip()
 
+                    # Debug: print first 500 chars of response
+                    print(f"[RAG] Chunking LLM response (first 500 chars): {response_text[:500]}")
+
                     # Parse JSON array
                     json_match = re.search(r'\[.*\]', response_text, re.DOTALL)
                     if json_match:
-                        chunks = json.loads(json_match.group(0))
-                        if isinstance(chunks, list) and all(isinstance(c, str) for c in chunks):
-                            print(f"[RAG] Split message into {len(chunks)} contextual chunks")
-                            return chunks
+                        try:
+                            chunks = json.loads(json_match.group(0))
+                            if isinstance(chunks, list) and all(isinstance(c, str) for c in chunks):
+                                print(f"[RAG] Split message into {len(chunks)} contextual chunks")
+                                return chunks
+                            else:
+                                print(f"[RAG] Chunking response not valid: not all strings")
+                        except json.JSONDecodeError as e:
+                            print(f"[RAG] Chunking JSON decode error: {e}")
 
                     # Fallback if parsing fails
                     print(f"[RAG] Chunking failed to parse, using original message")
