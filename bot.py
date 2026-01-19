@@ -302,7 +302,9 @@ async def on_message(message):
             context_str = None
             if RAG_ENABLED and not is_dm and rag_manager:
                 guild_id = message.guild.id
-                context_str = await rag_manager.retrieve_context(guild_id, content)
+                # Pass author's display name for query expansion (replaces "I", "my", etc.)
+                author_display_name = message.author.display_name
+                context_str = await rag_manager.retrieve_context(guild_id, content, author_display_name)
                 if context_str:
                     debug_log(f"Retrieved RAG context for query")
 

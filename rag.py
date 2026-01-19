@@ -389,9 +389,54 @@ class RAGManager:
         # Return top facts (without scores)
         return [fact for score, fact in scored_facts[:RAG_MAX_CONTEXT_FACTS]]
 
-    async def retrieve_context(self, guild_id: int, query: str) -> Optional[str]:
+    def expand_query_with_author(self, query: str, author_name: Optional[str]) -> str:
+        """Expand query by replacing first-person pronouns with author's name.
+
+        Examples:
+            "where do I live?" -> "where does Cameron live?"
+            "what is my birthday?" -> "what is Cameron's birthday?"
+            "when was I born?" -> "when was Cameron born?"
+        """
+        if not author_name:
+            return query
+
+        expanded = query
+
+        # Replace common first-person patterns (case-insensitive)
+        # "where do I" -> "where does {name}"
+        expanded = re.sub(r'\bdo I\b', f'does {author_name}', expanded, flags=re.IGNORECASE)
+        # "am I" -> "is {name}"
+        expanded = re.sub(r'\bam I\b', f'is {author_name}', expanded, flags=re.IGNORECASE)
+        # "was I" -> "was {name}"
+        expanded = re.sub(r'\bwas I\b', f'was {author_name}', expanded, flags=re.IGNORECASE)
+        # "have I" -> "has {name}"
+        expanded = re.sub(r'\bhave I\b', f'has {author_name}', expanded, flags=re.IGNORECASE)
+        # "can I" -> "can {name}"
+        expanded = re.sub(r'\bcan I\b', f'can {author_name}', expanded, flags=re.IGNORECASE)
+        # "will I" -> "will {name}"
+        expanded = re.sub(r'\bwill I\b', f'will {author_name}', expanded, flags=re.IGNORECASE)
+        # "did I" -> "did {name}"
+        expanded = re.sub(r'\bdid I\b', f'did {author_name}', expanded, flags=re.IGNORECASE)
+        # Standalone "I" at word boundary -> "{name}"
+        expanded = re.sub(r'\bI\b', author_name, expanded)
+        # "my" -> "{name}'s"
+        expanded = re.sub(r'\bmy\b', f"{author_name}'s", expanded, flags=re.IGNORECASE)
+        # "me" -> "{name}"
+        expanded = re.sub(r'\bme\b', author_name, expanded, flags=re.IGNORECASE)
+        # "mine" -> "{name}'s"
+        expanded = re.sub(r'\bmine\b', f"{author_name}'s", expanded, flags=re.IGNORECASE)
+
+        if expanded != query:
+            print(f"[RAG] Query expanded: '{query}' -> '{expanded}'")
+
+        return expanded
+
+    async def retrieve_context(self, guild_id: int, query: str, author_name: Optional[str] = None) -> Optional[str]:
         """Retrieve relevant context for a query using vector search (with fallback to keyword)."""
         try:
+            # Expand query by replacing first-person pronouns with author's name
+            expanded_query = self.expand_query_with_author(query, author_name)
+
             # Load guild data for migration check and fallback
             data = self.load_guild_data(guild_id)
             facts = data.get("facts", [])
@@ -409,8 +454,8 @@ class RAGManager:
                     print(f"[RAG] Lazy migration: {json_count} JSON facts, {vector_count} vector facts")
                     self.migrate_to_vector_db(guild_id)
 
-                # Search using vector similarity
-                relevant_facts = self.search_facts_vector(guild_id, query)
+                # Search using vector similarity with expanded query
+                relevant_facts = self.search_facts_vector(guild_id, expanded_query)
 
                 if relevant_facts:
                     # Format context string
@@ -422,8 +467,8 @@ class RAGManager:
                         context_lines.append(f"- {content} {source}")
                     return "\n".join(context_lines)
 
-            # Fallback to keyword search
-            query_keywords = self.extract_keywords(query)
+            # Fallback to keyword search (also use expanded query)
+            query_keywords = self.extract_keywords(expanded_query)
 
             if not query_keywords:
                 return None
