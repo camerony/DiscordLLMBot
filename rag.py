@@ -548,16 +548,25 @@ Each fact should have:
 - category: One of [birthday, location, contact, preference, general]
 - confidence: A score from 0 to 1 indicating your confidence in the fact
 - keywords: Array of searchable keywords (lowercase, no stopwords). IMPORTANT: Always include person names, places, and other entity names as keywords!
-- entities: Object with extracted entities (e.g., {"person": "John", "date": "May 15, 1990"})
+- entities: Object with extracted entities (e.g., {"person": "John Smith", "date": "May 15, 1990"})
 
-IMPORTANT: Replace first-person pronouns (I, me, my, mine) with the author's name.
-Example: If author is "Cameron" and message is "I live in Seattle":
-- content should be: "Cameron lives in Seattle"
-- NOT: "I live in Seattle"
+CRITICAL RULES:
+1. ALWAYS preserve FULL NAMES (first AND last name) when available. Never shorten to just first name.
+   - "Cameron River's address is 123 Main St" - CORRECT
+   - "Cameron's address is 123 Main St" - WRONG (missing last name)
 
-Example: For "Cameron River's birthday is June 6, 1976"
-- keywords should be: ["cameron", "river", "birthday", "june", "1976"]
-- NOT just: ["birthday", "june", "1976"]
+2. Replace first-person pronouns (I, me, my, mine) with the author's name.
+   - If author is "Cameron" and message is "I live in Seattle":
+   - content should be: "Cameron lives in Seattle"
+
+3. When extracting from structured contact data, preserve the full name for EACH fact.
+   - Input: "John Smith - Birthday: Jan 1 - Email: john@email.com"
+   - Output facts should be: "John Smith's birthday is Jan 1", "John Smith's email is john@email.com"
+   - NOT: "John's birthday is Jan 1" (missing last name)
+
+4. Include full names (all parts) in keywords.
+   - keywords should be: ["john", "smith", "birthday", "jan"]
+   - NOT just: ["john", "birthday", "jan"]
 
 Return [] if no facts are found. Do not include conversational or hypothetical statements."""
 
