@@ -10,6 +10,7 @@ A Discord bot that automatically translates messages between Chinese and English
 - **Language Mismatch Detection** - Bot adds 🔄 reaction when wrong language is used
 - **On-Demand Translation** - Click 🔄 to translate any message in-place
 - **Edit Tracking** - Updates translations when original messages are edited
+- **Direct Message Chat** - DM the bot to chat with the LLM directly (no translation)
 - **Rich Embeds** - Shows author, original message, and translation with clickable links
 - **Attachment Support** - Forwards images and files with translations
 - **Multi-Guild Support** - Works across multiple Discord servers
@@ -37,6 +38,12 @@ The bot monitors paired channels and translates messages bidirectionally:
 - When you edit a message, the translation is automatically updated
 - Edited translations show a ✏️ indicator in the footer
 - Note: Edit tracking is stored in memory and resets when the bot restarts
+
+**Direct messages:**
+- DM the bot to chat with the LLM directly
+- No translation, just pure LLM conversation
+- Ask questions, get help, or chat about anything
+- Example: "What is the capital of France?"
 
 ### Channel Pairing Methods (in priority order)
 

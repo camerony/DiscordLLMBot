@@ -256,6 +256,58 @@ async def on_message(message):
     if message.author.bot:
         return
 
+    # Handle DMs as LLM chat requests
+    if isinstance(message.channel, discord.DMChannel):
+        content = message.content.strip()
+        if not content:
+            return
+
+        debug_log(f"DM from {message.author.name}: {content}")
+
+        # Send typing indicator
+        async with message.channel.typing():
+            # Make LLM request without translation prompt
+            payload = {
+                "model": LLM_MODEL,
+                "messages": [{"role": "user", "content": content}],
+                "temperature": 0.7,
+                "max_tokens": 2000
+            }
+
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.post(LLM_URL, json=payload) as resp:
+                        if resp.status == 200:
+                            data = await resp.json()
+                            response = data["choices"][0]["message"]["content"].strip()
+
+                            # Split long responses into multiple messages (Discord limit: 2000 chars)
+                            if len(response) <= 2000:
+                                await message.channel.send(response)
+                            else:
+                                # Split at newlines or spaces to avoid cutting mid-sentence
+                                chunks = []
+                                current_chunk = ""
+                                for line in response.split("\n"):
+                                    if len(current_chunk) + len(line) + 1 <= 2000:
+                                        current_chunk += line + "\n"
+                                    else:
+                                        if current_chunk:
+                                            chunks.append(current_chunk)
+                                        current_chunk = line + "\n"
+                                if current_chunk:
+                                    chunks.append(current_chunk)
+
+                                for chunk in chunks:
+                                    await message.channel.send(chunk)
+                        else:
+                            await message.channel.send(f"Sorry, I encountered an error: HTTP {resp.status}")
+                            print(f"LLM API error: {resp.status}")
+            except Exception as e:
+                await message.channel.send("Sorry, I encountered an error processing your request.")
+                print(f"DM chat error: {e}")
+        return
+
     # Check if this channel has a pair
     if message.channel.id not in channel_pairs:
         debug_log(f"Skipping message in unpaired channel: {message.channel.name}")
