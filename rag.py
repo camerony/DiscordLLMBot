@@ -286,7 +286,7 @@ Author: {message.author.display_name}"""
                     {"role": "user", "content": user_prompt}
                 ],
                 "temperature": 0.1,
-                "max_tokens": 500
+                "max_tokens": 1500
             }
 
             # Make LLM request
