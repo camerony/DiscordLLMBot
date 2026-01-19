@@ -256,13 +256,23 @@ async def on_message(message):
     if message.author.bot:
         return
 
-    # Handle DMs as LLM chat requests
-    if isinstance(message.channel, discord.DMChannel):
-        content = message.content.strip()
+    # Handle bot mentions as LLM chat requests (both DMs and channel mentions)
+    is_dm = isinstance(message.channel, discord.DMChannel)
+    is_mentioned = client.user in message.mentions
+
+    if is_dm or is_mentioned:
+        # Extract content, removing bot mention if present
+        content = message.content
+        if is_mentioned:
+            # Remove the bot mention from the message
+            content = content.replace(f'<@{client.user.id}>', '').replace(f'<@!{client.user.id}>', '').strip()
+        else:
+            content = content.strip()
+
         if not content:
             return
 
-        debug_log(f"DM from {message.author.name}: {content}")
+        debug_log(f"Chat request from {message.author.name} in {message.channel}: {content}")
 
         # Send typing indicator
         async with message.channel.typing():
@@ -283,9 +293,9 @@ async def on_message(message):
 
                             # Split long responses into multiple messages (Discord limit: 2000 chars)
                             if len(response) <= 2000:
-                                await message.channel.send(response)
+                                await message.reply(response)
                             else:
-                                # Split at newlines or spaces to avoid cutting mid-sentence
+                                # Split at newlines to avoid cutting mid-sentence
                                 chunks = []
                                 current_chunk = ""
                                 for line in response.split("\n"):
@@ -298,14 +308,16 @@ async def on_message(message):
                                 if current_chunk:
                                     chunks.append(current_chunk)
 
-                                for chunk in chunks:
+                                # Reply to first chunk, send rest as follow-ups
+                                await message.reply(chunks[0])
+                                for chunk in chunks[1:]:
                                     await message.channel.send(chunk)
                         else:
-                            await message.channel.send(f"Sorry, I encountered an error: HTTP {resp.status}")
+                            await message.reply(f"Sorry, I encountered an error: HTTP {resp.status}")
                             print(f"LLM API error: {resp.status}")
             except Exception as e:
-                await message.channel.send("Sorry, I encountered an error processing your request.")
-                print(f"DM chat error: {e}")
+                await message.reply("Sorry, I encountered an error processing your request.")
+                print(f"Chat error: {e}")
         return
 
     # Check if this channel has a pair
