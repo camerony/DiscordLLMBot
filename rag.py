@@ -18,8 +18,9 @@ RAG_KEYWORD_MATCH_THRESHOLD = float(os.environ.get("RAG_KEYWORD_MATCH_THRESHOLD"
 RAG_CHANNEL_ENABLED = os.environ.get("RAG_CHANNEL_ENABLED", "true").lower() == "true"
 RAG_CHANNEL_PATTERN = os.environ.get("RAG_CHANNEL_PATTERN", "knowledge|facts|rag|info")
 RAG_VERIFIED_BOOST = float(os.environ.get("RAG_VERIFIED_BOOST", "1.5"))
-RAG_EXTRACTION_MAX_TOKENS = int(os.environ.get("RAG_EXTRACTION_MAX_TOKENS", "1500"))
+RAG_EXTRACTION_MAX_TOKENS = int(os.environ.get("RAG_EXTRACTION_MAX_TOKENS", "10000"))
 RAG_CHUNKING_ENABLED = os.environ.get("RAG_CHUNKING_ENABLED", "true").lower() == "true"
+RAG_CHUNKING_MAX_TOKENS = int(os.environ.get("RAG_CHUNKING_MAX_TOKENS", "10000"))
 RAG_CHUNK_THRESHOLD = int(os.environ.get("RAG_CHUNK_THRESHOLD", "2000"))
 RAG_CHUNK_MAX_SIZE = int(os.environ.get("RAG_CHUNK_MAX_SIZE", "500"))
 
@@ -293,7 +294,7 @@ Example output:
                 {"role": "user", "content": content}
             ],
             "temperature": 0.1,
-            "max_tokens": 10000  # Need enough tokens for large contact lists
+            "max_tokens": RAG_CHUNKING_MAX_TOKENS
         }
 
         try:
