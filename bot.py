@@ -25,9 +25,13 @@ if pairs_str:
 # Will be populated on bot ready
 channel_pairs: Dict[int, int] = {}
 
+# Track messages that have been translated via reaction to prevent re-translation
+translated_messages: set = set()
+
 intents = discord.Intents.default()
 intents.message_content = True
 intents.guilds = True
+intents.reactions = True
 client = discord.Client(intents=intents)
 
 
@@ -80,6 +84,41 @@ def parse_pair_from_topic(topic: str) -> Optional[str]:
     return None
 
 
+def parse_lang_from_topic(topic: str) -> Optional[str]:
+    """Extract language tag from channel topic (e.g., 'lang: zh', 'lang: en')."""
+    if not topic:
+        return None
+
+    # Match "lang: xx" where xx is a language code
+    match = re.search(r'lang:\s*(\w+)', topic, re.IGNORECASE)
+    if match:
+        return match.group(1).lower()
+    return None
+
+
+def get_channel_language(channel: discord.TextChannel) -> str:
+    """
+    Determine the language of a channel.
+    Returns 'zh' for Chinese, 'en' for English.
+    Checks lang: tag in topic first, then falls back to channel name.
+    """
+    # Check for explicit lang tag in channel topic
+    if channel.topic:
+        lang = parse_lang_from_topic(channel.topic)
+        if lang:
+            # Normalize to 'zh' or 'en'
+            if lang in ['zh', 'zh-cn', 'zh-tw', 'cn']:
+                return 'zh'
+            elif lang == 'en':
+                return 'en'
+
+    # Fallback: detect from channel name
+    if has_chinese(channel.name):
+        return 'zh'
+    else:
+        return 'en'
+
+
 def auto_detect_pairs(guild: discord.Guild) -> Dict[int, int]:
     """Auto-detect channel pairs by emoji prefix and language."""
     pairs = {}
@@ -112,7 +151,7 @@ def auto_detect_pairs(guild: discord.Guild) -> Dict[int, int]:
 
 
 def build_channel_pairs(guild: discord.Guild) -> Dict[int, int]:
-    """Build complete channel pair mapping with priority: topic > manual > auto."""
+    """Build complete channel pair mapping with priority: explicit pair > manual > auto."""
     pairs = {}
 
     # Step 1: Auto-detect as base layer
@@ -123,7 +162,7 @@ def build_channel_pairs(guild: discord.Guild) -> Dict[int, int]:
     if MANUAL_PAIRS:
         debug_log(f"Applied {len(MANUAL_PAIRS) // 2} manual pair overrides")
 
-    # Step 3: Parse channel topics (highest priority)
+    # Step 3: Parse channel topics for explicit pair declarations (highest priority)
     for channel in guild.text_channels:
         if channel.topic:
             pair_ref = parse_pair_from_topic(channel.topic)
@@ -226,14 +265,33 @@ async def on_message(message):
         debug_log(f"Error: Paired channel {target_channel_id} not found")
         return
 
-    # Handle media-only messages
+    # Get message content
     content = message.content.strip()
-    if not content and (message.attachments or message.embeds):
-        content = "[Media attachment]"
+
+    # Handle media-only messages (no text, just attachments)
+    if not content and message.attachments:
+        debug_log(f"Media-only message in {message.channel.name}, forwarding attachments")
+        # Send attachments directly without translation
+        for att in message.attachments:
+            await target_channel.send(att.url)
+        return
 
     # Skip if no content at all
     if not content or len(content) < 2:
         debug_log(f"Skipping short/empty message")
+        return
+
+    # Detect language mismatch
+    channel_lang = get_channel_language(message.channel)
+    message_lang = 'zh' if has_chinese(content) else 'en'
+
+    # If language doesn't match channel, add 🔄 reaction and skip
+    if channel_lang != message_lang:
+        debug_log(f"Language mismatch in {message.channel.name}: adding 🔄 reaction")
+        try:
+            await message.add_reaction("🔄")
+        except discord.errors.Forbidden:
+            print("Warning: Bot lacks permission to add reactions")
         return
 
     # Translate the content
@@ -269,28 +327,54 @@ async def on_message(message):
     embed.set_footer(text="🔗 Jump to original")
     embed.url = message.jump_url
 
-    # Prepare attachment info
-    files_to_send = []
-    attachment_info = []
+    # Send translation embed
+    await target_channel.send(embed=embed)
 
+    # Send attachments as separate messages (for messages with both text and images)
     if message.attachments:
         for att in message.attachments:
-            # Add attachment URLs to embed
-            if att.content_type and att.content_type.startswith('image/'):
-                attachment_info.append(f"📷 [{att.filename}]({att.url})")
-                # Set first image as embed image
-                if not embed.image:
-                    embed.set_image(url=att.url)
-            elif att.content_type and att.content_type.startswith('video/'):
-                attachment_info.append(f"📹 [{att.filename}]({att.url})")
-            else:
-                attachment_info.append(f"📎 [{att.filename}]({att.url})")
+            await target_channel.send(att.url)
 
-    if attachment_info:
-        embed.add_field(name="Attachments", value="\n".join(attachment_info), inline=False)
 
-    # Send translation to paired channel
-    await target_channel.send(embed=embed)
+@client.event
+async def on_reaction_add(reaction, user):
+    # Ignore bot's own reactions
+    if user.bot:
+        return
+
+    # Only handle 🔄 emoji
+    if str(reaction.emoji) != "🔄":
+        return
+
+    message = reaction.message
+
+    # Skip if already translated
+    if message.id in translated_messages:
+        debug_log(f"Message {message.id} already translated, skipping")
+        return
+
+    # Skip if message has no content
+    content = message.content.strip()
+    if not content or len(content) < 2:
+        return
+
+    debug_log(f"🔄 reaction on message in {message.channel.name} by {user.name}")
+
+    # Translate and reply in same channel
+    start_time = time.time()
+    translation = await translate(content)
+    elapsed = time.time() - start_time
+
+    if not translation:
+        debug_log(f"Translation failed for reaction in {message.channel.name}")
+        return
+
+    # Mark as translated
+    translated_messages.add(message.id)
+
+    # Reply with simple translation (not full embed for in-channel)
+    await message.reply(f"**Translation:**\n{translation}", mention_author=False)
+    debug_log(f"Translated via reaction: {message.channel.name} ({elapsed:.2f}s)")
 
 
 if __name__ == "__main__":
