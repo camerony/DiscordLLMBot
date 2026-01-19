@@ -5,7 +5,8 @@ import json
 import os
 import glob
 
-data_dir = "./data"
+# Use environment variable or default to /data
+data_dir = os.environ.get("RAG_DATA_DIR", "/data")
 
 print("=" * 60)
 print("RAG Database Contents")
