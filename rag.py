@@ -306,21 +306,28 @@ Example output:
                     data = await resp.json()
                     response_text = data["choices"][0]["message"]["content"].strip()
 
-                    # Debug: print first 500 chars of response
-                    print(f"[RAG] Chunking LLM response (first 500 chars): {response_text[:500]}")
-
-                    # Parse JSON array
-                    json_match = re.search(r'\[.*\]', response_text, re.DOTALL)
+                    # Try to parse JSON array from response
+                    # First, try to find a JSON array in the response
+                    json_match = re.search(r'\[\s*".*\]\s*$', response_text, re.DOTALL)
                     if json_match:
-                        try:
-                            chunks = json.loads(json_match.group(0))
-                            if isinstance(chunks, list) and all(isinstance(c, str) for c in chunks):
-                                print(f"[RAG] Split message into {len(chunks)} contextual chunks")
-                                return chunks
-                            else:
-                                print(f"[RAG] Chunking response not valid: not all strings")
-                        except json.JSONDecodeError as e:
-                            print(f"[RAG] Chunking JSON decode error: {e}")
+                        json_str = json_match.group(0)
+                    else:
+                        # If no match, maybe the response IS the JSON array
+                        json_str = response_text
+
+                    # Debug: show what we're trying to parse
+                    print(f"[RAG] Attempting to parse JSON (length: {len(json_str)}, first 200 chars): {json_str[:200]}")
+
+                    try:
+                        chunks = json.loads(json_str)
+                        if isinstance(chunks, list) and len(chunks) > 0 and all(isinstance(c, str) for c in chunks):
+                            print(f"[RAG] Successfully split message into {len(chunks)} contextual chunks")
+                            return chunks
+                        else:
+                            print(f"[RAG] Parsed JSON but not valid format (type: {type(chunks)}, len: {len(chunks) if isinstance(chunks, list) else 'N/A'})")
+                    except json.JSONDecodeError as e:
+                        print(f"[RAG] JSON decode error: {e}")
+                        print(f"[RAG] Full response text: {response_text}")
 
                     # Fallback if parsing fails
                     print(f"[RAG] Chunking failed to parse, using original message")
