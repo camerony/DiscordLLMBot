@@ -4,4 +4,5 @@ RUN mkdir -p /data && chmod 777 /data
 RUN pip install --no-cache-dir discord.py aiohttp
 COPY bot.py .
 COPY rag.py .
+COPY check_rag.py .
 CMD ["python", "-u", "bot.py"]
