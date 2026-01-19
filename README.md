@@ -75,6 +75,13 @@ You can designate a RAG channel in two ways:
 - Facts from RAG channel are marked as "verified" and prioritized 1.5x
 - Example: Post "Office address is 123 Main St, Seattle, WA" in #knowledge-base
 
+**Smart Chunking for Large Messages:**
+- When you paste large amounts of data (e.g., 30 contacts), the bot automatically chunks it intelligently
+- The LLM preserves context by keeping related information together
+- Example: All of Bella's facts (birthday, email, phone, address) stay together in one chunk
+- Implicit context is made explicit: "Email: bella@gmail.com" becomes "Bella Liu's email is bella@gmail.com"
+- You can paste multiple contacts at once - the bot handles splitting and context preservation
+
 ### Channel Pairing Methods (in priority order)
 
 1. **Channel Topic - Explicit Pairing** (highest priority) - Add to channel description:
@@ -181,6 +188,9 @@ Enable `DEBUG_MODE=true` to see detected channel pairs on startup.
 | `RAG_CHANNEL_ENABLED` | Enable designated RAG channel | `true` |
 | `RAG_CHANNEL_PATTERN` | Channel name pattern for RAG channels | `knowledge\|facts\|rag\|info` |
 | `RAG_VERIFIED_BOOST` | Score multiplier for verified facts | `1.5` |
+| `RAG_CHUNKING_ENABLED` | Enable LLM-based message chunking | `true` |
+| `RAG_CHUNK_THRESHOLD` | Min characters before chunking | `2000` |
+| `RAG_CHUNK_MAX_SIZE` | Target size per chunk | `500` |
 
 ## Examples
 

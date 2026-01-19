@@ -372,9 +372,16 @@ async def on_message(message):
             content = message.content.strip()
             if content and len(content) >= 2:
                 guild_id = message.guild.id
-                asyncio.create_task(
-                    rag_manager.extract_facts_from_message(message, content, is_rag_channel=True)
-                )
+
+                # Chunk large messages with context preservation
+                chunks = await rag_manager.chunk_message_with_context(content)
+
+                # Process each chunk separately
+                for chunk in chunks:
+                    asyncio.create_task(
+                        rag_manager.extract_facts_from_message(message, chunk, is_rag_channel=True)
+                    )
+
                 # React with ✅ to confirm fact was recorded
                 try:
                     await message.add_reaction("✅")

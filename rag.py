@@ -19,6 +19,9 @@ RAG_CHANNEL_ENABLED = os.environ.get("RAG_CHANNEL_ENABLED", "true").lower() == "
 RAG_CHANNEL_PATTERN = os.environ.get("RAG_CHANNEL_PATTERN", "knowledge|facts|rag|info")
 RAG_VERIFIED_BOOST = float(os.environ.get("RAG_VERIFIED_BOOST", "1.5"))
 RAG_EXTRACTION_MAX_TOKENS = int(os.environ.get("RAG_EXTRACTION_MAX_TOKENS", "1500"))
+RAG_CHUNKING_ENABLED = os.environ.get("RAG_CHUNKING_ENABLED", "true").lower() == "true"
+RAG_CHUNK_THRESHOLD = int(os.environ.get("RAG_CHUNK_THRESHOLD", "2000"))
+RAG_CHUNK_MAX_SIZE = int(os.environ.get("RAG_CHUNK_MAX_SIZE", "500"))
 
 # LLM Configuration (reuse from main bot)
 LLM_URL = os.environ.get("LLM_URL", "http://localhost:8080/v1/chat/completions")
@@ -257,6 +260,66 @@ class RAGManager:
         except Exception as e:
             print(f"Error retrieving context for guild {guild_id}: {e}")
             return None
+
+    async def chunk_message_with_context(self, content: str) -> List[str]:
+        """Use LLM to split large message into contextually complete chunks."""
+
+        # Only chunk if enabled and message is large
+        if not RAG_CHUNKING_ENABLED or len(content) < RAG_CHUNK_THRESHOLD:
+            return [content]
+
+        system_prompt = f"""Split the following message into smaller chunks where each chunk is self-contained and preserves context.
+
+Rules:
+1. Keep all information about one person/entity together in the same chunk
+2. Add context where needed (e.g., "Email: bella@gmail.com" → "Bella Liu's email is bella@gmail.com")
+3. Each chunk should be under {RAG_CHUNK_MAX_SIZE} characters
+4. Return a JSON array of strings, one per chunk
+5. Preserve all original information - don't summarize or omit anything
+
+Example input:
+"Bella Liu's birthday is January 17, 2005. Email: bellaliu208@gmail.com. Mobile: (949) 351-9388. Nicholas Liu's birthday is December 6, 2006."
+
+Example output:
+[
+  "Bella Liu's birthday is January 17, 2005. Bella Liu's email is bellaliu208@gmail.com. Bella Liu's mobile is (949) 351-9388.",
+  "Nicholas Liu's birthday is December 6, 2006."
+]"""
+
+        payload = {
+            "model": LLM_MODEL,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": content}
+            ],
+            "temperature": 0.1,
+            "max_tokens": 2000
+        }
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(LLM_URL, json=payload) as resp:
+                    if resp.status != 200:
+                        print(f"LLM chunking failed: {resp.status}")
+                        return [content]  # Fallback to single chunk
+
+                    data = await resp.json()
+                    response_text = data["choices"][0]["message"]["content"].strip()
+
+                    # Parse JSON array
+                    json_match = re.search(r'\[.*\]', response_text, re.DOTALL)
+                    if json_match:
+                        chunks = json.loads(json_match.group(0))
+                        if isinstance(chunks, list) and all(isinstance(c, str) for c in chunks):
+                            print(f"[RAG] Split message into {len(chunks)} contextual chunks")
+                            return chunks
+
+                    # Fallback if parsing fails
+                    print(f"[RAG] Chunking failed to parse, using original message")
+                    return [content]
+        except Exception as e:
+            print(f"Error chunking message: {e}")
+            return [content]  # Fallback
 
     async def extract_facts_from_message(self, message, content: str, is_rag_channel: bool = False):
         """Extract facts from a message using LLM."""
