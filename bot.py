@@ -28,6 +28,10 @@ channel_pairs: Dict[int, int] = {}
 # Track messages that have been translated via reaction to prevent re-translation
 translated_messages: set = set()
 
+# Track message ID mappings: original_message_id -> translation_message_id
+# Used for updating translations when original message is edited
+message_mappings: Dict[int, int] = {}
+
 intents = discord.Intents.default()
 intents.message_content = True
 intents.guilds = True
@@ -311,29 +315,115 @@ async def on_message(message):
         color=0x5865F2 if not has_chinese(content) else 0xED4245  # Blue for EN→CN, Red for CN→EN
     )
 
-    # Add author info
+    # Add author info with clickable link to original
     embed.set_author(
         name=f"{message.author.display_name} • #{message.channel.name}",
-        icon_url=message.author.display_avatar.url
+        icon_url=message.author.display_avatar.url,
+        url=message.jump_url
     )
 
-    # Add original message preview if not too long
-    if len(content) <= 100:
-        embed.add_field(name="Original", value=content, inline=False)
-    else:
-        embed.add_field(name="Original", value=content[:100] + "...", inline=False)
-
-    # Add link to original message
-    embed.set_footer(text="🔗 Jump to original")
-    embed.url = message.jump_url
-
     # Send translation embed
-    await target_channel.send(embed=embed)
+    translation_msg = await target_channel.send(embed=embed)
+
+    # Store message mapping for edit tracking
+    message_mappings[message.id] = translation_msg.id
 
     # Send attachments as separate messages (for messages with both text and images)
     if message.attachments:
         for att in message.attachments:
             await target_channel.send(att.url)
+
+
+@client.event
+async def on_message_edit(before, after):
+    """Handle message edits and update translations."""
+    # Ignore bot messages
+    if after.author.bot:
+        return
+
+    # Check if this message was translated
+    if before.id not in message_mappings:
+        debug_log(f"Edited message {before.id} has no translation, skipping")
+        return
+
+    # Check if content actually changed
+    if before.content == after.content:
+        debug_log(f"Message {before.id} edited but content unchanged, skipping")
+        return
+
+    # Check if message is in a paired channel
+    if after.channel.id not in channel_pairs:
+        return
+
+    # Get the translation message
+    translation_msg_id = message_mappings[before.id]
+    target_channel_id = channel_pairs[after.channel.id]
+    target_channel = client.get_channel(target_channel_id)
+
+    if not target_channel:
+        debug_log(f"Error: Paired channel {target_channel_id} not found for edit")
+        return
+
+    try:
+        translation_msg = await target_channel.fetch_message(translation_msg_id)
+    except discord.NotFound:
+        debug_log(f"Translation message {translation_msg_id} not found, removing mapping")
+        del message_mappings[before.id]
+        return
+    except discord.Forbidden:
+        print(f"Warning: Bot lacks permission to fetch message {translation_msg_id}")
+        return
+
+    # Get new content
+    content = after.content.strip()
+
+    # Skip if no content
+    if not content or len(content) < 2:
+        debug_log(f"Edited message has no content, skipping")
+        return
+
+    # Check language mismatch
+    channel_lang = get_channel_language(after.channel)
+    message_lang = 'zh' if has_chinese(content) else 'en'
+
+    if channel_lang != message_lang:
+        debug_log(f"Edited message has language mismatch, not updating translation")
+        return
+
+    # Translate the new content
+    start_time = time.time()
+    translation = await translate(content)
+    elapsed = time.time() - start_time
+
+    if not translation:
+        debug_log(f"Translation failed for edited message in {after.channel.name}")
+        return
+
+    debug_log(f"Updated translation for edited message in {after.channel.name} ({elapsed:.2f}s)")
+
+    # Update the embed
+    embed = discord.Embed(
+        description=translation,
+        color=0x5865F2 if not has_chinese(content) else 0xED4245
+    )
+
+    # Add author info with clickable link to original
+    embed.set_author(
+        name=f"{after.author.display_name} • #{after.channel.name}",
+        icon_url=after.author.display_avatar.url,
+        url=after.jump_url
+    )
+
+    # Add edited indicator
+    embed.set_footer(text="✏️ Edited")
+
+    # Update the translation message
+    try:
+        await translation_msg.edit(embed=embed)
+    except discord.Forbidden:
+        print(f"Warning: Bot lacks permission to edit message {translation_msg_id}")
+    except discord.HTTPException as e:
+        print(f"Error editing translation message: {e}")
 
 
 @client.event

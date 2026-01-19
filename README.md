@@ -9,6 +9,7 @@ A Discord bot that automatically translates messages between Chinese and English
 - **Cross-Channel Translation** - Posts translations to paired channels (not replies)
 - **Language Mismatch Detection** - Bot adds 🔄 reaction when wrong language is used
 - **On-Demand Translation** - Click 🔄 to translate any message in-place
+- **Edit Tracking** - Updates translations when original messages are edited
 - **Rich Embeds** - Shows author, original message, and translation with clickable links
 - **Attachment Support** - Forwards images and files with translations
 - **Multi-Guild Support** - Works across multiple Discord servers
@@ -31,6 +32,11 @@ The bot monitors paired channels and translates messages bidirectionally:
 - Message in English channel with Chinese text → Bot adds 🔄 reaction
 - Message in Chinese channel with English text → Bot adds 🔄 reaction
 - Anyone can click 🔄 to get translation as a reply in the same channel
+
+**Edited messages:**
+- When you edit a message, the translation is automatically updated
+- Edited translations show a ✏️ indicator in the footer
+- Note: Edit tracking is stored in memory and resets when the bot restarts
 
 ### Channel Pairing Methods (in priority order)
 
