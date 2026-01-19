@@ -463,7 +463,7 @@ async def on_reaction_add(reaction, user):
     translated_messages.add(message.id)
 
     # Reply with simple translation (not full embed for in-channel)
-    await message.reply(f"**Translation:**\n{translation}", mention_author=False)
+    await message.reply(translation, mention_author=False)
     debug_log(f"Translated via reaction: {message.channel.name} ({elapsed:.2f}s)")
 
 
