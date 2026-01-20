@@ -710,9 +710,9 @@ async def on_raw_message_update(payload: discord.RawMessageUpdateEvent):
             message, chunk, is_rag_channel=True  # Treat as verified
         )
 
-    # Add reaction to confirm extraction
+    # Add reaction to confirm extraction (same as RAG channel)
     try:
-        await message.add_reaction("📌")
+        await message.add_reaction("✅")
     except discord.Forbidden:
         pass
 

@@ -78,7 +78,7 @@ You can designate a RAG channel in two ways:
 **Pinned Messages as Knowledge:**
 - Pin any message in any channel to add it to the knowledge base
 - Bot automatically extracts facts from pinned messages
-- Bot reacts with 📌 to confirm extraction
+- Bot reacts with ✅ to confirm extraction
 - Pinned messages are treated as verified facts (same priority as RAG channel)
 - On startup, bot bootstraps all existing pinned messages
 - Works across all channels - no need for a dedicated knowledge channel
