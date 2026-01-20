@@ -217,7 +217,8 @@ async def load_pinned_messages(guild: discord.Guild):
 
     for channel in guild.text_channels:
         try:
-            pins = await channel.pins()
+            # Use async iterator for pins (avoids deprecation warning)
+            pins = [pin async for pin in channel.pins()]
             if not pins:
                 continue
 
@@ -228,7 +229,8 @@ async def load_pinned_messages(guild: discord.Guild):
                 for f in guild_data.get("facts", [])
             }
 
-            new_pins = [p for p in pins if p.id not in existing_msg_ids]
+            # Compare as strings since message_id is stored as string in JSON
+            new_pins = [p for p in pins if str(p.id) not in existing_msg_ids]
             if not new_pins:
                 continue
 
@@ -690,7 +692,8 @@ async def on_raw_message_update(payload: discord.RawMessageUpdateEvent):
         f.get("extracted_from", {}).get("message_id")
         for f in guild_data.get("facts", [])
     }
-    if message.id in existing_msg_ids:
+    # Compare as string since message_id is stored as string in JSON
+    if str(message.id) in existing_msg_ids:
         debug_log(f"Pinned message {message.id} already processed, skipping")
         return
 
