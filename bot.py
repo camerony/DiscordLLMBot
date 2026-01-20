@@ -21,6 +21,7 @@ RAG_KEYWORD_MATCH_THRESHOLD = float(os.environ.get("RAG_KEYWORD_MATCH_THRESHOLD"
 RAG_CHANNEL_ENABLED = os.environ.get("RAG_CHANNEL_ENABLED", "true").lower() == "true"
 RAG_CHANNEL_PATTERN = os.environ.get("RAG_CHANNEL_PATTERN", "knowledge|facts|rag|info")
 RAG_VERIFIED_BOOST = float(os.environ.get("RAG_VERIFIED_BOOST", "1.5"))
+RAG_PINNED_ENABLED = os.environ.get("RAG_PINNED_ENABLED", "true").lower() == "true"
 
 # Parse manual channel pairs: "id1:id2,id3:id4,..."
 MANUAL_PAIRS = {}
@@ -207,6 +208,54 @@ def build_channel_pairs(guild: discord.Guild) -> Dict[int, int]:
     return pairs
 
 
+async def load_pinned_messages(guild: discord.Guild):
+    """Load all pinned messages from guild channels into RAG."""
+    if not RAG_ENABLED or not RAG_PINNED_ENABLED or not rag_manager:
+        return
+
+    total_facts = 0
+
+    for channel in guild.text_channels:
+        try:
+            pins = await channel.pins()
+            if not pins:
+                continue
+
+            # Get existing message IDs to avoid reprocessing
+            guild_data = rag_manager.load_guild_data(guild.id)
+            existing_msg_ids = {
+                f.get("extracted_from", {}).get("message_id")
+                for f in guild_data.get("facts", [])
+            }
+
+            new_pins = [p for p in pins if p.id not in existing_msg_ids]
+            if not new_pins:
+                continue
+
+            print(f"[RAG] Loading {len(new_pins)} new pinned message(s) from #{channel.name}")
+
+            for message in new_pins:
+                content = message.content.strip()
+                if not content or len(content) < 2:
+                    continue
+
+                # Chunk and extract
+                chunks = await rag_manager.chunk_message_with_context(content)
+                for chunk in chunks:
+                    await rag_manager.extract_facts_from_message(
+                        message, chunk, is_rag_channel=True
+                    )
+                    total_facts += 1
+
+        except discord.Forbidden:
+            debug_log(f"No permission to read pins in #{channel.name}")
+        except Exception as e:
+            print(f"[RAG] Error loading pins from #{channel.name}: {e}")
+
+    if total_facts > 0:
+        print(f"[RAG] Loaded {total_facts} fact(s) from pinned messages in {guild.name}")
+
+
 async def translate(text: str) -> Optional[str]:
     """Translate text using the LLM API."""
     # Detect direction based on Chinese character presence
@@ -270,6 +319,12 @@ async def on_ready():
         print(f"Total active pairs: {len(shown) // 2}\n")
     else:
         print(f"✓ Monitoring {len(channel_pairs) // 2} channel pairs")
+
+    # Load pinned messages for each guild
+    if RAG_ENABLED and RAG_PINNED_ENABLED:
+        print("✓ Loading pinned messages into RAG...")
+        for guild in client.guilds:
+            await load_pinned_messages(guild)
 
 
 @client.event
@@ -604,6 +659,62 @@ async def on_reaction_add(reaction, user):
     # Reply with simple translation (not full embed for in-channel)
     await message.reply(translation, mention_author=False)
     debug_log(f"Translated via reaction: {message.channel.name} ({elapsed:.2f}s)")
+
+
+@client.event
+async def on_raw_message_update(payload: discord.RawMessageUpdateEvent):
+    """Handle message updates, including pin events."""
+    if not RAG_ENABLED or not RAG_PINNED_ENABLED or not rag_manager:
+        return
+
+    # Check if this is a pin event (pinned field changed to True)
+    if not payload.data.get("pinned"):
+        return
+
+    # Get the channel and guild
+    channel = client.get_channel(payload.channel_id)
+    if not channel or not hasattr(channel, 'guild'):
+        return
+
+    guild_id = channel.guild.id
+
+    # Fetch the full message
+    try:
+        message = await channel.fetch_message(payload.message_id)
+    except (discord.NotFound, discord.Forbidden):
+        return
+
+    # Skip if already processed (check if fact exists with this message_id)
+    guild_data = rag_manager.load_guild_data(guild_id)
+    existing_msg_ids = {
+        f.get("extracted_from", {}).get("message_id")
+        for f in guild_data.get("facts", [])
+    }
+    if message.id in existing_msg_ids:
+        debug_log(f"Pinned message {message.id} already processed, skipping")
+        return
+
+    content = message.content.strip()
+    if not content or len(content) < 2:
+        return
+
+    print(f"[RAG] Pinned message detected in #{channel.name}")
+
+    # Chunk if needed and extract facts (marked as verified)
+    chunks = await rag_manager.chunk_message_with_context(content)
+
+    for i, chunk in enumerate(chunks, 1):
+        if len(chunks) > 1:
+            print(f"[RAG] Processing pinned chunk {i}/{len(chunks)}...")
+        await rag_manager.extract_facts_from_message(
+            message, chunk, is_rag_channel=True  # Treat as verified
+        )
+
+    # Add reaction to confirm extraction
+    try:
+        await message.add_reaction("📌")
+    except discord.Forbidden:
+        pass
 
 
 if __name__ == "__main__":

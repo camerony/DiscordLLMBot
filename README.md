@@ -75,6 +75,14 @@ You can designate a RAG channel in two ways:
 - Facts from RAG channel are marked as "verified" and prioritized 1.5x
 - Example: Post "Office address is 123 Main St, Seattle, WA" in #knowledge-base
 
+**Pinned Messages as Knowledge:**
+- Pin any message in any channel to add it to the knowledge base
+- Bot automatically extracts facts from pinned messages
+- Bot reacts with 📌 to confirm extraction
+- Pinned messages are treated as verified facts (same priority as RAG channel)
+- On startup, bot bootstraps all existing pinned messages
+- Works across all channels - no need for a dedicated knowledge channel
+
 **Smart Chunking for Large Messages:**
 - When you paste large amounts of data (e.g., 30 contacts), the bot automatically chunks it intelligently
 - The LLM preserves context by keeping related information together
@@ -197,6 +205,7 @@ Enable `DEBUG_MODE=true` to see detected channel pairs on startup.
 | `RAG_CHANNEL_ENABLED` | Enable designated RAG channel | `true` |
 | `RAG_CHANNEL_PATTERN` | Channel name pattern for RAG channels | `knowledge\|facts\|rag\|info` |
 | `RAG_VERIFIED_BOOST` | Score multiplier for verified facts | `1.5` |
+| `RAG_PINNED_ENABLED` | Extract facts from pinned messages | `true` |
 | `RAG_CHUNKING_ENABLED` | Enable LLM-based message chunking | `true` |
 | `RAG_CHUNKING_MAX_TOKENS` | Max tokens for chunking LLM call | `10000` |
 | `RAG_CHUNK_THRESHOLD` | Min characters before chunking | `2000` |
